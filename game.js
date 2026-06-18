@@ -164,6 +164,11 @@ function setupSocketListeners() {
     socket.on('entityAdded', (entity) => {
         entities.set(entity.id, entity);
     });
+    // Catch generic errors emitted explicitly by your Render Node.js server
+    socket.on('error', (err) => {
+        console.error("Server Socket Error Packet:", err);
+        displayGlobalError(`Server Error: ${err.message || err}`);
+    });
 
     socket.on('entityRemoved', (id) => {
         entities.delete(id);
