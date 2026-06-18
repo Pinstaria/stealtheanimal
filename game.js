@@ -36,6 +36,30 @@ assets.loadImage('animal', '/sprites/animal_base.png');
 assets.loadSound('grab', '/sounds/grab.mp3');
 assets.loadSound('sell', '/sounds/cha-ching.mp3');
 
+// --- GLOBAL FRONTEND ERROR CATCHER ---
+function displayGlobalError(message) {
+    const toast = document.getElementById('error-toast');
+    const text = document.getElementById('error-toast-text');
+    if (toast && text) {
+        text.innerText = message;
+        toast.style.display = 'block';
+        // Auto-hide the error alert banner after 6 seconds
+        setTimeout(() => { toast.style.display = 'none'; }, 6000);
+    }
+}
+
+// Catch general runtime errors (syntax, typos, variables not defined)
+window.addEventListener('error', (event) => {
+    console.error("Runtime Exception:", event.error);
+    displayGlobalError(`Client Error: ${event.message}`);
+});
+
+// Catch failed asynchronous calls (Firebase connectivity issues, async/await drops)
+window.addEventListener('unhandledrejection', (event) => {
+    console.error("Unhandled Promise Drop:", event.reason);
+    displayGlobalError(`Async Error: ${event.reason?.message || event.reason}`);
+});
+
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 let socket;
