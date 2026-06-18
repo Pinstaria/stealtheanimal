@@ -40,6 +40,18 @@
             <button id="claim-egg-btn">Claim Weekly Egg</button>
         </div>
     </div>
+    <div id="events-menu" class="hud-box" style="top: 150px; right: 20px;">
+        <h3>🎡 Daily Event</h3>
+        <button id="spin-wheel-btn">Spin Wheel</button>
+    </div>
+
+    <div id="upgrades-menu" class="hud-box" style="bottom: 20px; right: 20px;">
+        <h3>🛠️ Base Upgrades</h3>
+        <p>Status: <strong id="base-status" style="color: #e74c3c;">🔓 UNLOCKED</strong></p>
+        <button id="lock-base-btn">Lock Base (Protect Animals)</button>
+        <button id="upgrade-capacity-btn">Upgrade Capacity ($5k)</button>
+        <button id="upgrade-lock-btn">Upgrade Lock Time ($2.5k)</button>
+    </div>
 
     <script type="module" src="./firebase-setup.js"></script>
     <script src="/socket.io/socket.io.js"></script>
