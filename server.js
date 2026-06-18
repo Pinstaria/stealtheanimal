@@ -10,6 +10,7 @@ const {
 } = require('./constants');
 
 const app = express();
+app.use(express.static('.'));
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
