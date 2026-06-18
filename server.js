@@ -307,3 +307,14 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`[🚀] Animal Snatchers Server live on port ${PORT}`);
 });
+// --- GLOBAL BACKEND EXCEPTION LOGGER ---
+process.on('uncaughtException', (err) => {
+    console.error(`[CRITICAL CRASH] Uncaught Exception thrown: ${err.message}`);
+    console.error(err.stack);
+    // Keeps the Node process alive despite a critical logical failure
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[WARNING] Unhandled Async Promise Rejection at:', promise);
+    console.error(`Reason: ${reason?.stack || reason}`);
+});
