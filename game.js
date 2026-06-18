@@ -55,7 +55,7 @@ async function initGame() {
         document.getElementById('money-display').innerText = localData.money;
 
         // Connect to Server
-        socket = io(); 
+        socket = io("https://stealtheanimal.onrender.com"); 
         uiManager = new UIManager(localData, socket, myUid);
         
         socket.emit('joinLobby', { savedData: localData });
