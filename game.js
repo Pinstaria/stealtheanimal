@@ -1,6 +1,9 @@
 // public/game.js
 
+// Replace your top import line in public/game.js with this:
 import { authenticateAndLoadData, savePlayerData } from './firebase-setup.js';
+import { UIManager } from './ui-mechanics.js';
+import { BaseRenderer } from './base-rendering.js';
 // Paste this directly near the top of public/game.js:
 class AssetManager {
     constructor() {
@@ -50,6 +53,45 @@ let localData = { money: 0 };
     ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false, 
     space: false 
 };
+// Add these variables right under your existing 'let localData = { money: 0 };'
+let uiManager;
+let baseRenderer;
+
+// Replace your current initGame() function with this fixed version:
+async function initGame() {
+    try {
+        // 1. Authenticate & Load Firebase Data
+        let authData;
+        try {
+            authData = await authenticateAndLoadData();
+        } catch (e) {
+            console.warn("Firebase not set up yet! Using temporary local data to test.");
+            authData = { uid: "GUEST_123", savedData: { money: 0, lockLevel: 1, animals: [] } };
+        }
+        
+        myUid = authData.uid;
+        localData = authData.savedData;
+        document.getElementById('money-display').innerText = localData.money;
+
+        // 2. Connect to Multiplayer Server
+        // Make sure this points to your Render URL if hosting online!
+        socket = io(); 
+
+        // 3. Initialize the UI Buttons and Base Drawer
+        uiManager = new UIManager(localData, socket, myUid);
+        
+        socket.emit('joinLobby', { savedData: localData });
+
+        setupSocketListeners();
+        setupInputListeners();
+        
+        // Start Render Loop
+        requestAnimationFrame(gameLoop);
+
+    } catch (error) {
+        console.error("Failed to initialize game:", error);
+    }
+}
 // Resize Canvas
 function resizeCanvas() {
     canvas.width = window.innerWidth;
@@ -252,7 +294,88 @@ function drawCamera() {
     const offsetY = canvas.height / 2 - me.y;
     return { offsetX, offsetY };
 }
+// Paste this helper function right above your gameLoop() function
+function drawMapBackground() {
+    // Draw Grass Floor
+    ctx.fillStyle = "#27ae60"; 
+    ctx.fillRect(-1000, -1000, 4000, 4000); // Massive grass background
+    
+    // Draw Grid Lines so you can feel the movement
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.1)";
+    ctx.lineWidth = 2;
+    for(let i = -1000; i < 3000; i += 100) {
+        ctx.beginPath(); ctx.moveTo(i, -1000); ctx.lineTo(i, 3000); ctx.stroke(); // Vertical
+        ctx.beginPath(); ctx.moveTo(-1000, i); ctx.lineTo(3000, i); ctx.stroke(); // Horizontal
+    }
+    
+    // Draw Dark Boundary Wall (Radius 2000 from center 1000,1000)
+    ctx.strokeStyle = "#2c3e50";
+    ctx.lineWidth = 10;
+    ctx.beginPath();
+    ctx.arc(1000, 1000, 2000, 0, Math.PI * 2);
+    ctx.stroke();
+}
 
+// Now replace your entire gameLoop() function with this:
+function gameLoop() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    updateMovement();
+    const { offsetX, offsetY } = drawCamera();
+
+    ctx.save();
+    ctx.translate(offsetX, offsetY); // Move context based on camera
+
+    // 1. Draw the actual Map Background
+    drawMapBackground();
+
+    // 2. Draw Map Center Zone (Spawn Area)
+    ctx.fillStyle = "rgba(46, 204, 113, 0.5)";
+    ctx.beginPath();
+    ctx.arc(1000, 1000, 500, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 3. Draw Player Base
+    if (!baseRenderer && myId) {
+        baseRenderer = new BaseRenderer(ctx, myId);
+    }
+    if (baseRenderer) {
+        baseRenderer.drawBase(localData.animals);
+    }
+
+    // 4. Draw Animals on Ground
+    centralAnimals.forEach(animal => {
+        ctx.fillStyle = "#f1c40f"; // Fallback color if you don't have getRarityColor here
+        ctx.beginPath();
+        ctx.arc(animal.x, animal.y, 10, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#000";
+        ctx.stroke();
+    });
+
+    // 5. Draw Entities (Players and Bots)
+    entities.forEach(entity => {
+        ctx.fillStyle = entity.id === myId ? "#3498db" : (entity.isBot ? "#e67e22" : "#e74c3c");
+        ctx.fillRect(entity.x - 20, entity.y - 20, 40, 40);
+        
+        if (entity.isBot) {
+            ctx.fillStyle = "#fff";
+            ctx.font = "bold 14px Arial";
+            ctx.fillText("B", entity.x, entity.y + 5);
+        }
+
+        if (entity.carryingAnimal) {
+            ctx.fillStyle = "#fff";
+            ctx.beginPath();
+            ctx.arc(entity.x, entity.y - 30, 8, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+        }
+    });
+
+    ctx.restore(); // Restore camera offset
+    requestAnimationFrame(gameLoop);
+}
 function gameLoop() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
