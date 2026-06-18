@@ -22,6 +22,10 @@
     <canvas id="gameCanvas"></canvas>
 
     <div id="ui-layer">
+        <div id="error-toast" class="hud-box" style="top: 20px; left: 50%; transform: translateX(-50%); background: rgba(231, 76, 60, 0.95); border: 2px solid #ff7675; display: none; z-index: 9999; max-width: 400px; text-align: center;">
+            <h4 style="margin: 0 0 5px 0;">⚠️ System Error</h4>
+            <p id="error-toast-text" style="margin: 0; font-size: 13px; font-family: monospace;"></p>
+        </div>
         <div id="top-left" class="hud-box">
             <h2>💰 $<span id="money-display">0</span></h2>
             <p>Friend Code: <strong id="friend-code-display">...</strong></p>
