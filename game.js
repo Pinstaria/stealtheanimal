@@ -218,7 +218,7 @@ function setupInputListeners() {
                 socket.emit('adminSpawnRequest', raritySelect.value);
             }
         });
-    }-+
+    }
 }
 
 // --- GAMEPLAY MECHANICS ---
