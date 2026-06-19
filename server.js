@@ -11,7 +11,6 @@ const {
     RARITIES, BASE_PRICES, getAnimalNameByRarity 
 } = require('./constants');
 
-const app = express();
 app.use(express.static('.'));
 // PERFECT CORS SETUP FOR SOCKET.IO
 const io = require("socket.io")(server, {
