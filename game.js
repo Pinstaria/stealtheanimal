@@ -1,102 +1,194 @@
 import { authenticateAndLoadData, savePlayerData } from './firebase-setup.js';
 import { UIManager } from './ui-mechanics.js';
-import { BaseRenderer } from './base-rendering.js';
 
-// --- ASSET MANAGER (Disabled to fix your 404 errors) ---
-class AssetManager {
-    constructor() {
-        this.images = {};
-        this.sounds = {};
-    }
-    loadImage(key, src) { /* Empty for now */ }
-    loadSound(key, src) { /* Empty for now */ }
-    playSound(key) { /* Empty for now */ }
+// --- 3D SCENE CONFIGURATION ---
+let scene, camera, renderer;
+let myUid = null, myId = null, lobbyCode = null, socket;
+let localData = { money: 0, animals: [], isAdmin: false }, uiManager;
+
+let entities = new Map(); 
+let centralAnimals = new Map(); 
+let localPlayerMesh = null;
+
+const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false, space: false };
+
+// --- INITIALIZE 3D WORLD ---
+function init3D() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a1a1a); 
+
+    camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dirLight.position.set(20, 40, 20);
+    scene.add(dirLight);
+
+    // The Grass Floor
+    const floorGeo = new THREE.PlaneGeometry(300, 300);
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 0.8 });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2; 
+    scene.add(floor);
+
+    // The Central Spawner Platform (Where animals drop)
+    const spawnGeo = new THREE.CylinderGeometry(15, 15, 1, 32);
+    const spawnMat = new THREE.MeshStandardMaterial({ color: 0x2ecc71, emissive: 0x2ecc71, emissiveIntensity: 0.2 });
+    const spawnPlatform = new THREE.Mesh(spawnGeo, spawnMat);
+    spawnPlatform.position.set(0, 0.5, 0); 
+    scene.add(spawnPlatform);
+
+    // The Center Beacon Light
+    const beaconGeo = new THREE.CylinderGeometry(2, 2, 200, 16, 1, true);
+    const beaconMat = new THREE.MeshBasicMaterial({ color: 0x2ecc71, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
+    const beacon = new THREE.Mesh(beaconGeo, beaconMat);
+    beacon.position.set(0, 100, 0);
+    scene.add(beacon);
+
+    // THE SINGLE RED CARPET (Steal a Brainrot Style)
+    // Stretches from the deep South edge (Z: 140) straight to the Center Spawner (Z: 0)
+    const carpetGeo = new THREE.PlaneGeometry(10, 140);
+    const carpetMat = new THREE.MeshStandardMaterial({ color: 0xc0392b });
+    const mainCarpet = new THREE.Mesh(carpetGeo, carpetMat);
+    mainCarpet.rotation.x = -Math.PI / 2; 
+    mainCarpet.position.set(0, 0.05, 70); // Centered halfway between 0 and 140
+    scene.add(mainCarpet);
+
+    // Starting Pad at the end of the Red Carpet
+    const startPadGeo = new THREE.BoxGeometry(20, 1, 20);
+    const startPadMat = new THREE.MeshStandardMaterial({ color: 0x3498db });
+    const startPad = new THREE.Mesh(startPadGeo, startPadMat);
+    startPad.position.set(0, 0.05, 140);
+    scene.add(startPad);
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
 }
 
-const assets = new AssetManager();
-// I have commented these out so the browser stops throwing 404 errors!
-// assets.loadImage('player', '/sprites/player.png');
-// assets.loadImage('bot', '/sprites/bot.png');
-// assets.loadImage('animal', '/sprites/animal_base.png');
-// assets.loadSound('grab', '/sounds/grab.mp3');
-// assets.loadSound('sell', '/sounds/cha-ching.mp3');
-
-// --- GAME STATE ---
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
-let socket;
-let myUid = null;
-let myId = null;
-let lobbyCode = null;
-let entities = new Map();
-let centralAnimals = [];
-let localData = { money: 0, animals: [] };
-let uiManager;
-let baseRenderer;
-
-const keys = { 
-    w: false, a: false, s: false, d: false, 
-    ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false, 
-    space: false 
-};
-
-// --- INIT ---
+// --- CORE GAME ENGINE ---
 async function initGame() {
+    init3D();
     try {
         let authData;
-        try {
-            authData = await authenticateAndLoadData();
-        } catch (e) {
-            console.warn("Firebase not set up yet! Using temporary local data.");
-            authData = { uid: "GUEST_" + Math.random(), savedData: { money: 0, lockLevel: 1, animals: [] } };
+        try { 
+            authData = await authenticateAndLoadData(); 
+        } catch (e) { 
+            authData = { uid: "GUEST_" + Math.random(), savedData: { money: 0, lockLevel: 1, animals: [], isAdmin: false } }; 
         }
+        
         myUid = authData.uid;
         localData = authData.savedData;
         document.getElementById('money-display').innerText = localData.money;
 
-        // Connect to Server
-        socket = io("https://stealtheanimal.onrender.com"); 
+        // Reveal Admin Panel if they have the tag in Firebase
+        if (localData.isAdmin === true) {
+            document.getElementById('admin-menu').style.display = 'block';
+        }
+
+        // CONNECT TO MULTIPLAYER SERVER
+        socket = io("https://animal-snatchers-server.onrender.com"); 
         uiManager = new UIManager(localData, socket, myUid);
         
         socket.emit('joinLobby', { savedData: localData });
         setupSocketListeners();
         setupInputListeners();
+        
         requestAnimationFrame(gameLoop);
-    } catch (error) {
-        console.error("Game Load Error:", error);
+    } catch (error) { 
+        console.error("Game Loader Crash:", error); 
     }
 }
 
-// --- SOCKET LISTENERS ---
+// --- SOCKET LOGIC ---
 function setupSocketListeners() {
     socket.on('lobbyJoined', (data) => {
         myId = socket.id;
         lobbyCode = data.friendCode;
         document.getElementById('friend-code-display').innerText = lobbyCode;
-        data.players.forEach(p => entities.set(p.id, p));
-        data.bots.forEach(b => entities.set(b.id, b));
-        centralAnimals = data.animals;
+        
+        data.players.forEach(p => spawnPlayerMesh(p, false));
+        data.bots.forEach(b => spawnPlayerMesh(b, true));
+        data.animals.forEach(a => spawnAnimalMesh(a));
     });
-    socket.on('animalSpawned', (a) => centralAnimals.push(a));
-    socket.on('playerMoved', (d) => { if (entities.has(d.id)) { let e = entities.get(d.id); e.x = d.x; e.y = d.y; }});
-    socket.on('animalGrabbed', (d) => {
-        centralAnimals = centralAnimals.filter(a => a.id !== d.animal.id);
-        if (entities.has(d.entityId)) entities.get(d.entityId).carryingAnimal = d.animal;
+
+    socket.on('animalSpawned', (animal) => spawnAnimalMesh(animal));
+
+    socket.on('playerMoved', (d) => {
+        if (entities.has(d.id)) {
+            const mesh = entities.get(d.id);
+            mesh.position.x = (d.x - 1000) * 0.1;
+            mesh.position.z = (d.y - 1000) * 0.1;
+        }
     });
-    socket.on('moneyUpdated', (m) => {
-        localData.money = m;
-        document.getElementById('money-display').innerText = m;
+
+    socket.on('entityAdded', (entity) => { 
+        if (!entities.has(entity.id)) spawnPlayerMesh(entity, entity.isBot); 
+    });
+
+    socket.on('entityRemoved', (id) => {
+        if (entities.has(id)) { 
+            scene.remove(entities.get(id)); 
+            entities.delete(id); 
+        }
+    });
+
+    socket.on('animalGrabbed', (data) => {
+        if (centralAnimals.has(data.animal.id)) {
+            scene.remove(centralAnimals.get(data.animal.id));
+            centralAnimals.delete(data.animal.id);
+        }
     });
 }
 
-// --- CONTROLS & MOVEMENT ---
+// --- 3D SPAWNERS ---
+function spawnPlayerMesh(data, isBot) {
+    const bodyGeo = new THREE.CapsuleGeometry(1, 2, 4, 8);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: data.id === socket.id ? 0x3498db : (isBot ? 0xe67e22 : 0xe74c3c) });
+    const mesh = new THREE.Mesh(bodyGeo, bodyMat);
+    mesh.position.set((data.x - 1000) * 0.1, 1.5, (data.y - 1000) * 0.1);
+    scene.add(mesh);
+    entities.set(data.id, mesh);
+    if (data.id === socket.id) localPlayerMesh = mesh;
+}
+
+function spawnAnimalMesh(animal) {
+    // Math to put server 2D coordinates into 3D center scale
+    const x3d = (animal.x - 1000) * 0.1;
+    const z3d = (animal.y - 1000) * 0.1;
+    
+    // Create the animal block
+    const animalGeo = new THREE.BoxGeometry(1.5, 1.5, 1.5);
+    
+    let hex = 0xf1c40f; 
+    if(animal.rarity === "Azure") hex = 0x00a8ff;
+    if(animal.rarity === "Diamond") hex = 0x74b9ff;
+    
+    const animalMat = new THREE.MeshStandardMaterial({ color: hex, roughness: 0.2 });
+    const animalMesh = new THREE.Mesh(animalGeo, animalMat);
+    animalMesh.position.set(x3d, 1, z3d);
+    
+    scene.add(animalMesh);
+    centralAnimals.set(animal.id, animalMesh);
+}
+
+// --- CONTROLS ---
 function setupInputListeners() {
     window.addEventListener('keydown', (e) => {
         if (e.key === 'w' || e.key === 'ArrowUp') keys.w = keys.ArrowUp = true;
         if (e.key === 'a' || e.key === 'ArrowLeft') keys.a = keys.ArrowLeft = true;
         if (e.key === 's' || e.key === 'ArrowDown') keys.s = keys.ArrowDown = true;
         if (e.key === 'd' || e.key === 'ArrowRight') keys.d = keys.ArrowRight = true;
-        if (e.key === ' ') { keys.space = true; attemptGrab(); }
+        if (e.key === ' ') { 
+            keys.space = true; 
+            attemptGrab(); 
+        }
     });
     window.addEventListener('keyup', (e) => {
         if (e.key === 'w' || e.key === 'ArrowUp') keys.w = keys.ArrowUp = false;
@@ -105,90 +197,72 @@ function setupInputListeners() {
         if (e.key === 'd' || e.key === 'ArrowRight') keys.d = keys.ArrowRight = false;
         if (e.key === ' ') keys.space = false;
     });
+
+    document.getElementById('join-btn').addEventListener('click', () => {
+        const code = document.getElementById('join-code-input').value.toUpperCase();
+        if (code.length === 6) { window.location.reload(); }
+    });
+
+    document.getElementById('admin-spawn-btn').addEventListener('click', () => {
+        const rarity = document.getElementById('admin-rarity-select').value;
+        socket.emit('adminSpawnRequest', rarity);
+    });
 }
 
-function updateMovement() {
-    if (!myId || !entities.has(myId)) return;
-    const me = entities.get(myId);
-    const speed = 5;
-    let newX = me.x, newY = me.y;
-    if (keys.w || keys.ArrowUp) newY -= speed;
-    if (keys.s || keys.ArrowDown) newY += speed;
-    if (keys.a || keys.ArrowLeft) newX -= speed;
-    if (keys.d || keys.ArrowRight) newX += speed;
-
-    if (Math.hypot(newX - 1000, newY - 1000) < 2000) {
-        me.x = newX; me.y = newY;
-        socket.emit('playerMove', { x: me.x, y: me.y });
-    }
-}
-
+// --- GAMEPLAY MECHANICS ---
 function attemptGrab() {
-    const me = entities.get(myId);
-    if (!me || me.carryingAnimal) return;
-    for (let a of centralAnimals) {
-        if (Math.hypot(me.x - a.x, me.y - a.y) < 40) {
-            socket.emit('grabAnimal', a.id);
+    if (!localPlayerMesh) return;
+    for (let [id, mesh] of centralAnimals) {
+        // Calculate distance from player to animal in 3D
+        const dist = Math.hypot(localPlayerMesh.position.x - mesh.position.x, localPlayerMesh.position.z - mesh.position.z);
+        if (dist < 5) { // Snatch radius
+            socket.emit('grabAnimal', id);
             break;
         }
     }
 }
 
-// --- RENDER LOOP ---
+function updateMovement() {
+    if (!localPlayerMesh) return;
+    const speed = 0.6;
+    let moved = false;
+
+    if (keys.w || keys.ArrowUp) { localPlayerMesh.position.z -= speed; moved = true; }
+    if (keys.s || keys.ArrowDown) { localPlayerMesh.position.z += speed; moved = true; }
+    if (keys.a || keys.ArrowLeft) { localPlayerMesh.position.x -= speed; moved = true; }
+    if (keys.d || keys.ArrowRight) { localPlayerMesh.position.x += speed; moved = true; }
+
+    if (moved) {
+        // 3D Wall Boundaries
+        const dist = Math.hypot(localPlayerMesh.position.x, localPlayerMesh.position.z);
+        if(dist > 145) {
+            const angle = Math.atan2(localPlayerMesh.position.z, localPlayerMesh.position.x);
+            localPlayerMesh.position.x = Math.cos(angle) * 144;
+            localPlayerMesh.position.z = Math.sin(angle) * 144;
+        }
+
+        // Send physical 3D location to the Node server mapping
+        const serverX = (localPlayerMesh.position.x * 10) + 1000;
+        const serverY = (localPlayerMesh.position.z * 10) + 1000;
+        socket.emit('playerMove', { x: serverX, y: serverY });
+    }
+}
+
+// --- LOOP RENDERING ---
 function gameLoop() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
     updateMovement();
     
-    // Safety check so game doesn't crash before player loads
-    if (!myId || !entities.has(myId)) {
-        requestAnimationFrame(gameLoop);
-        return;
+    // Third-Person Camera Logic
+    if (localPlayerMesh) {
+        camera.position.x = localPlayerMesh.position.x;
+        camera.position.y = localPlayerMesh.position.y + 18; // Eye height looking down
+        camera.position.z = localPlayerMesh.position.z + 24; // Distance behind player
+        camera.lookAt(localPlayerMesh.position.x, localPlayerMesh.position.y, localPlayerMesh.position.z);
     }
-
-    const offsetX = canvas.width/2 - entities.get(myId).x;
-    const offsetY = canvas.height/2 - entities.get(myId).y;
-    ctx.save();
-    ctx.translate(offsetX, offsetY);
-
-    // Draw Map & Base
-    ctx.fillStyle = "#27ae60"; 
-    ctx.fillRect(-1000, -1000, 4000, 4000); // Grass
     
-    // Gridlines
-    ctx.strokeStyle = "rgba(0,0,0,0.1)"; ctx.lineWidth = 2;
-    for(let i = -1000; i < 3000; i+=100) {
-        ctx.beginPath(); ctx.moveTo(i, -1000); ctx.lineTo(i, 3000); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(-1000, i); ctx.lineTo(3000, i); ctx.stroke();
-    }
-
-    if (!baseRenderer) baseRenderer = new BaseRenderer(ctx, myId);
-    baseRenderer.drawBase(localData.animals);
-
-    // Draw Animals
-    centralAnimals.forEach(a => { 
-        ctx.fillStyle = "#f1c40f"; 
-        ctx.beginPath(); 
-        ctx.arc(a.x, a.y, 10, 0, Math.PI*2); 
-        ctx.fill(); 
-        ctx.stroke();
-    });
-
-    // Draw Players/Bots
-    entities.forEach(e => {
-        ctx.fillStyle = e.id === myId ? "#3498db" : (e.isBot ? "#e67e22" : "#e74c3c");
-        ctx.fillRect(e.x - 20, e.y - 20, 40, 40);
-        
-        if (e.isBot) {
-            ctx.fillStyle = "#fff"; ctx.font = "bold 14px Arial"; ctx.fillText("B", e.x, e.y + 5);
-        }
-        if (e.carryingAnimal) {
-            ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(e.x, e.y - 30, 8, 0, Math.PI*2); ctx.fill(); ctx.stroke();
-        }
-    });
-
-    ctx.restore();
+    renderer.render(scene, camera);
     requestAnimationFrame(gameLoop);
 }
 
-// Start everything up
+// Start Engine
 initGame();
