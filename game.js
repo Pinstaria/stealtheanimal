@@ -10,6 +10,9 @@ let entities = new Map();
 let centralAnimals = new Map(); 
 let localPlayerMesh = null;
 
+// Camera orbit angle
+let cameraAngle = 0;
+
 const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false, space: false };
 
 // --- INITIALIZE 3D WORLD ---
@@ -35,7 +38,7 @@ function init3D() {
     floor.rotation.x = -Math.PI / 2; 
     scene.add(floor);
 
-    // The Central Spawner Platform (Where animals drop)
+    // The Central Spawner Platform
     const spawnGeo = new THREE.CylinderGeometry(15, 15, 1, 32);
     const spawnMat = new THREE.MeshStandardMaterial({ color: 0x2ecc71, emissive: 0x2ecc71, emissiveIntensity: 0.2 });
     const spawnPlatform = new THREE.Mesh(spawnGeo, spawnMat);
@@ -49,21 +52,39 @@ function init3D() {
     beacon.position.set(0, 100, 0);
     scene.add(beacon);
 
-    // THE SINGLE RED CARPET (Steal a Brainrot Style)
-    // Stretches from the deep South edge (Z: 140) straight to the Center Spawner (Z: 0)
+    // THE RED CARPET
     const carpetGeo = new THREE.PlaneGeometry(10, 140);
     const carpetMat = new THREE.MeshStandardMaterial({ color: 0xc0392b });
     const mainCarpet = new THREE.Mesh(carpetGeo, carpetMat);
     mainCarpet.rotation.x = -Math.PI / 2; 
-    mainCarpet.position.set(0, 0.05, 70); // Centered halfway between 0 and 140
+    mainCarpet.position.set(0, 0.05, 70); 
     scene.add(mainCarpet);
 
-    // Starting Pad at the end of the Red Carpet
+    // --- "STEAL A BRAINROT" STYLE BASE ---
+    const baseGroup = new THREE.Group();
+    
+    // Base Floor / Vault Pad
     const startPadGeo = new THREE.BoxGeometry(20, 1, 20);
     const startPadMat = new THREE.MeshStandardMaterial({ color: 0x3498db });
     const startPad = new THREE.Mesh(startPadGeo, startPadMat);
     startPad.position.set(0, 0.05, 140);
-    scene.add(startPad);
+    baseGroup.add(startPad);
+
+    // Base Walls (Left, Right, Back)
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x2c3e50, transparent: true, opacity: 0.9 });
+    const leftWall = new THREE.Mesh(new THREE.BoxGeometry(1, 8, 20), wallMat);
+    leftWall.position.set(-10, 4, 140);
+    baseGroup.add(leftWall);
+
+    const rightWall = new THREE.Mesh(new THREE.BoxGeometry(1, 8, 20), wallMat);
+    rightWall.position.set(10, 4, 140);
+    baseGroup.add(rightWall);
+
+    const backWall = new THREE.Mesh(new THREE.BoxGeometry(20, 8, 1), wallMat);
+    backWall.position.set(0, 4, 150);
+    baseGroup.add(backWall);
+
+    scene.add(baseGroup);
 
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
@@ -87,13 +108,14 @@ async function initGame() {
         localData = authData.savedData;
         document.getElementById('money-display').innerText = localData.money;
 
-        // Reveal Admin Panel if they have the tag in Firebase
-        if (localData.isAdmin === true) {
-            document.getElementById('admin-menu').style.display = 'block';
+        // [CRASH FIX] Safely check if the admin menu exists before trying to show it
+        const adminMenu = document.getElementById('admin-menu');
+        if (localData.isAdmin === true && adminMenu) {
+            adminMenu.style.display = 'block';
         }
 
         // CONNECT TO MULTIPLAYER SERVER
-        socket = io("https://stealtheanimal.onrender.com"); 
+        socket = io("https://animal-snatchers-server.onrender.com"); 
         uiManager = new UIManager(localData, socket, myUid);
         
         socket.emit('joinLobby', { savedData: localData });
@@ -149,33 +171,27 @@ function setupSocketListeners() {
 
 // --- 3D SPAWNERS ---
 function spawnPlayerMesh(data, isBot) {
-    // Changed from Capsule to Cylinder so it works flawlessly with your 3D version
     const bodyGeo = new THREE.CylinderGeometry(1, 1, 3, 16);
-    
-    const bodyMat = new THREE.MeshStandardMaterial({ 
-        color: data.id === socket.id ? 0x3498db : (isBot ? 0xe67e22 : 0xe74c3c) 
-    });
-    
+    const bodyMat = new THREE.MeshStandardMaterial({ color: data.id === socket.id ? 0x3498db : (isBot ? 0xe67e22 : 0xe74c3c) });
     const mesh = new THREE.Mesh(bodyGeo, bodyMat);
     mesh.position.set((data.x - 1000) * 0.1, 1.5, (data.y - 1000) * 0.1);
-    
     scene.add(mesh);
     entities.set(data.id, mesh);
-    
     if (data.id === socket.id) localPlayerMesh = mesh;
 }
 
 function spawnAnimalMesh(animal) {
-    // Math to put server 2D coordinates into 3D center scale
     const x3d = (animal.x - 1000) * 0.1;
     const z3d = (animal.y - 1000) * 0.1;
     
-    // Create the animal block
-    const animalGeo = new THREE.BoxGeometry(1.5, 1.5, 1.5);
+    // Future update: If animal has a "mutation", make the box larger!
+    const size = animal.isMutated ? 2.5 : 1.5;
+    const animalGeo = new THREE.BoxGeometry(size, size, size);
     
     let hex = 0xf1c40f; 
     if(animal.rarity === "Azure") hex = 0x00a8ff;
     if(animal.rarity === "Diamond") hex = 0x74b9ff;
+    if(animal.isMutated) hex = 0x9b59b6; // Purple for mutations!
     
     const animalMat = new THREE.MeshStandardMaterial({ color: hex, roughness: 0.2 });
     const animalMesh = new THREE.Mesh(animalGeo, animalMat);
@@ -192,10 +208,7 @@ function setupInputListeners() {
         if (e.key === 'a' || e.key === 'ArrowLeft') keys.a = keys.ArrowLeft = true;
         if (e.key === 's' || e.key === 'ArrowDown') keys.s = keys.ArrowDown = true;
         if (e.key === 'd' || e.key === 'ArrowRight') keys.d = keys.ArrowRight = true;
-        if (e.key === ' ') { 
-            keys.space = true; 
-            attemptGrab(); 
-        }
+        if (e.key === ' ') { keys.space = true; attemptGrab(); }
     });
     window.addEventListener('keyup', (e) => {
         if (e.key === 'w' || e.key === 'ArrowUp') keys.w = keys.ArrowUp = false;
@@ -205,25 +218,28 @@ function setupInputListeners() {
         if (e.key === ' ') keys.space = false;
     });
 
-// Safe Friending UI Listener
+    // 360 DEGREE CAMERA LOOK AROUND
+    window.addEventListener('mousemove', (e) => {
+        if (e.buttons === 2) { // If Right-Click is held down
+            cameraAngle -= e.movementX * 0.01; // Rotate camera based on mouse swipe
+        }
+    });
+    // Prevent the standard right-click menu from popping up and ruining gameplay
+    window.addEventListener('contextmenu', e => e.preventDefault());
+
     const joinBtn = document.getElementById('join-btn');
     if (joinBtn) {
         joinBtn.addEventListener('click', () => {
             const codeInput = document.getElementById('join-code-input');
-            if (codeInput && codeInput.value.length === 6) { 
-                window.location.reload(); 
-            }
+            if (codeInput && codeInput.value.length === 6) { window.location.reload(); }
         });
     }
 
-    // Safe Admin Spawner Listener
     const adminSpawnBtn = document.getElementById('admin-spawn-btn');
     if (adminSpawnBtn) {
         adminSpawnBtn.addEventListener('click', () => {
             const raritySelect = document.getElementById('admin-rarity-select');
-            if (raritySelect) {
-                socket.emit('adminSpawnRequest', raritySelect.value);
-            }
+            if (raritySelect) { socket.emit('adminSpawnRequest', raritySelect.value); }
         });
     }
 }
@@ -232,9 +248,8 @@ function setupInputListeners() {
 function attemptGrab() {
     if (!localPlayerMesh) return;
     for (let [id, mesh] of centralAnimals) {
-        // Calculate distance from player to animal in 3D
         const dist = Math.hypot(localPlayerMesh.position.x - mesh.position.x, localPlayerMesh.position.z - mesh.position.z);
-        if (dist < 5) { // Snatch radius
+        if (dist < 5) { 
             socket.emit('grabAnimal', id);
             break;
         }
@@ -246,13 +261,32 @@ function updateMovement() {
     const speed = 0.6;
     let moved = false;
 
-    if (keys.w || keys.ArrowUp) { localPlayerMesh.position.z -= speed; moved = true; }
-    if (keys.s || keys.ArrowDown) { localPlayerMesh.position.z += speed; moved = true; }
-    if (keys.a || keys.ArrowLeft) { localPlayerMesh.position.x -= speed; moved = true; }
-    if (keys.d || keys.ArrowRight) { localPlayerMesh.position.x += speed; moved = true; }
+    // Relative movement based on Camera Angle (W always goes "forward" relative to where you look)
+    const sinAngle = Math.sin(cameraAngle);
+    const cosAngle = Math.cos(cameraAngle);
+
+    if (keys.w || keys.ArrowUp) { 
+        localPlayerMesh.position.x -= sinAngle * speed; 
+        localPlayerMesh.position.z -= cosAngle * speed; 
+        moved = true; 
+    }
+    if (keys.s || keys.ArrowDown) { 
+        localPlayerMesh.position.x += sinAngle * speed; 
+        localPlayerMesh.position.z += cosAngle * speed; 
+        moved = true; 
+    }
+    if (keys.a || keys.ArrowLeft) { 
+        localPlayerMesh.position.x -= cosAngle * speed; 
+        localPlayerMesh.position.z += sinAngle * speed; 
+        moved = true; 
+    }
+    if (keys.d || keys.ArrowRight) { 
+        localPlayerMesh.position.x += cosAngle * speed; 
+        localPlayerMesh.position.z -= sinAngle * speed; 
+        moved = true; 
+    }
 
     if (moved) {
-        // 3D Wall Boundaries
         const dist = Math.hypot(localPlayerMesh.position.x, localPlayerMesh.position.z);
         if(dist > 145) {
             const angle = Math.atan2(localPlayerMesh.position.z, localPlayerMesh.position.x);
@@ -260,7 +294,6 @@ function updateMovement() {
             localPlayerMesh.position.z = Math.sin(angle) * 144;
         }
 
-        // Send physical 3D location to the Node server mapping
         const serverX = (localPlayerMesh.position.x * 10) + 1000;
         const serverY = (localPlayerMesh.position.z * 10) + 1000;
         socket.emit('playerMove', { x: serverX, y: serverY });
@@ -271,11 +304,13 @@ function updateMovement() {
 function gameLoop() {
     updateMovement();
     
-    // Third-Person Camera Logic
     if (localPlayerMesh) {
-        camera.position.x = localPlayerMesh.position.x;
-        camera.position.y = localPlayerMesh.position.y + 18; // Eye height looking down
-        camera.position.z = localPlayerMesh.position.z + 24; // Distance behind player
+        const camDist = 25;
+        // Orbit camera around player using trigonometry
+        camera.position.x = localPlayerMesh.position.x + Math.sin(cameraAngle) * camDist;
+        camera.position.z = localPlayerMesh.position.z + Math.cos(cameraAngle) * camDist;
+        camera.position.y = localPlayerMesh.position.y + 18; 
+        
         camera.lookAt(localPlayerMesh.position.x, localPlayerMesh.position.y, localPlayerMesh.position.z);
     }
     
