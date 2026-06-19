@@ -172,6 +172,22 @@ class Lobby {
 
 io.on('connection', (socket) => {
     console.log(`[+] Player connected: ${socket.id}`);
+    // ADMIN OVERRIDE SPAWN
+    socket.on('adminSpawnRequest', (rarity) => {
+        const friendCode = playersToLobby.get(socket.id);
+        if (!friendCode) return;
+        
+        const lobby = lobbies.get(friendCode);
+        
+        // Force spawn specific rarity
+        const newAnimal = new Animal();
+        newAnimal.rarity = rarity;
+        newAnimal.name = getAnimalNameByRarity(rarity); // From constants.js
+        
+        lobby.centralAnimals.push(newAnimal);
+        io.to(friendCode).emit('animalSpawned', newAnimal);
+        console.log(`[ADMIN] Player ${socket.id} spawned a ${rarity}!`);
+    });
 
     // JOIN / CREATE LOBBY
     socket.on('joinLobby', (data) => {
