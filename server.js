@@ -2,6 +2,8 @@
 
 const express = require('express');
 const http = require('http');
+const app = express();
+const server = http.createServer(app);
 const { Server } = require('socket.io');
 const crypto = require('crypto');
 const { 
@@ -11,11 +13,12 @@ const {
 
 const app = express();
 app.use(express.static('.'));
-const server = http.createServer(app);
+// PERFECT CORS SETUP FOR SOCKET.IO
 const io = require("socket.io")(server, {
     cors: {
-        origin: "*", 
-        methods: ["GET", "POST"]
+        origin: "https://pinstaria.github.io", // Allow your exact GitHub URL
+        methods: ["GET", "POST"],
+        credentials: true
     }
 });
 
