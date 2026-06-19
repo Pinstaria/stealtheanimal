@@ -12,7 +12,12 @@ const {
 const app = express();
 app.use(express.static('.'));
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
+const io = new Server(server, {
+    cors: {
+        origin: "*", // This tells the server to accept connections from your GitHub Pages
+        methods: ["GET", "POST"]
+    }
+});
 
 // --- GAME STATE ---
 const lobbies = new Map(); // Map of FriendCode -> LobbyInstance
