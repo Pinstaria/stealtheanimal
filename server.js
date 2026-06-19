@@ -7,32 +7,47 @@ const app = express();
 app.use(express.static('.'));
 const server = http.createServer(app);
 
-const io = new Server(server, {
-    cors: { origin: "*", methods: ["GET", "POST"] }
-});
+const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
 
 const RARITIES = ["Regular", "Regular", "Regular", "Diamond", "Azure"];
 const BASE_PRICES = { "Regular": 10, "Diamond": 100, "Azure": 1000, "Illegal": 50000 };
+const WEATHERS = ["Clear", "Clear", "Radioactive", "Blood Moon", "Blizzard", "Golden Hour"];
 
 const lobbies = new Map();
 const playersToLobby = new Map();
 
 class Animal {
-    constructor(forcedRarity = null, forceMutate = false) {
+    constructor(forcedRarity = null, forcedMutation = null, currentWeather = "Clear") {
         this.id = crypto.randomUUID();
         this.rarity = forcedRarity || RARITIES[Math.floor(Math.pow(Math.random(), 4) * RARITIES.length)];
-        this.isMutated = forceMutate; 
         
-        // Spawn at the very START of the runway (Server Y: 800)
-        this.x = 1000 + (Math.random() * 20 - 10); // Center belt
-        this.y = 800; // Far north
+        // Apply mutations based on active weather (40% chance during weather event)
+        this.mutation = forcedMutation || "None";
+        if (this.mutation === "None" && currentWeather !== "Clear" && Math.random() > 0.6) {
+            if (currentWeather === "Radioactive") this.mutation = "Mutated";
+            if (currentWeather === "Blood Moon") this.mutation = "Vampiric";
+            if (currentWeather === "Blizzard") this.mutation = "Frozen";
+            if (currentWeather === "Golden Hour") this.mutation = "Midas";
+        }
+
+        // Calculate Multipliers
+        let multi = 1;
+        if (this.mutation === "Mutated") multi = 3;
+        if (this.mutation === "Vampiric") multi = 5;
+        if (this.mutation === "Frozen") multi = 2;
+        if (this.mutation === "Midas") multi = 10;
+        
+        this.value = (BASE_PRICES[this.rarity] || 10) * multi;
+        
+        // Spawn on the Conveyor Belt
+        this.x = 1000 + (Math.random() * 20 - 10); 
+        this.y = 800; 
     }
 }
 
 class Base {
     constructor(x, y) {
         this.animals = [];
-        this.isLocked = false;
         this.ownerId = null;
         this.x = x;
         this.y = y;
@@ -46,29 +61,33 @@ class Lobby {
         this.bots = new Map();
         this.bases = new Map();
         this.centralAnimals = [];
+        this.weather = "Clear";
         this.startLoops();
     }
 
     startLoops() {
-        // SPAWNER: Drops items onto the carpet every 1.5 seconds
+        // SPAWNER
         this.spawnInterval = setInterval(() => {
             if (this.centralAnimals.length < 25) {
-                const animal = new Animal();
+                const animal = new Animal(null, null, this.weather);
                 this.centralAnimals.push(animal);
                 io.to(this.friendCode).emit('animalSpawned', animal);
             }
         }, 1500);
 
-        // CONVEYOR BELT & BOT ENGINE: Runs 10 times a second
+        // WEATHER CYCLE (Changes every 20 seconds)
+        this.weatherInterval = setInterval(() => {
+            this.weather = WEATHERS[Math.floor(Math.random() * WEATHERS.length)];
+            io.to(this.friendCode).emit('weatherChanged', this.weather);
+        }, 20000);
+
+        // CONVEYOR & AI
         this.botAIInterval = setInterval(() => {
-            
-            // 1. Move all animals down the runway
+            // Move items down belt
             for (let i = this.centralAnimals.length - 1; i >= 0; i--) {
                 let animal = this.centralAnimals[i];
-                animal.y += 2; // Slide down carpet
-                
-                // If it hits the portal (Y = 1200), despawn it
-                if (animal.y > 1200) {
+                animal.y += 2; 
+                if (animal.y > 1200) { // Hit portal
                     this.centralAnimals.splice(i, 1);
                     io.to(this.friendCode).emit('animalRemoved', animal.id);
                 } else {
@@ -76,36 +95,26 @@ class Lobby {
                 }
             }
 
-            // 2. Bot AI Logic
+            // Bot AI
             this.bots.forEach((bot, botId) => {
                 const myBase = this.bases.get(botId);
-                
-                // Base locking check
-                const distToPlatform = Math.hypot(bot.x - myBase.x, bot.y - myBase.y);
-                myBase.isLocked = distToPlatform < 20;
-
                 if (!bot.carryingAnimal) {
-                    // Go after the animal furthest down the runway
                     if (this.centralAnimals.length > 0) {
                         let target = this.centralAnimals[0];
                         bot.x += (target.x - bot.x) * 0.08;
                         bot.y += (target.y - bot.y) * 0.08;
 
-                        // Grab it!
                         if (Math.hypot(bot.x - target.x, bot.y - target.y) < 15) {
                             bot.carryingAnimal = this.centralAnimals.shift();
                             io.to(this.friendCode).emit('animalRemoved', bot.carryingAnimal.id);
                         }
                     }
                 } else {
-                    // Run back to base
                     bot.x += (myBase.x - bot.x) * 0.08;
                     bot.y += (myBase.y - bot.y) * 0.08;
 
-                    // Deposit
-                    if (distToPlatform < 10) {
-                        myBase.animals.push(bot.carryingAnimal);
-                        bot.carryingAnimal = null;
+                    if (Math.hypot(bot.x - myBase.x, bot.y - myBase.y) < 15) {
+                        bot.carryingAnimal = null; // Bot deposits and deletes item
                     }
                 }
             });
@@ -120,13 +129,11 @@ io.on('connection', (socket) => {
         if (!lobbies.has(code)) lobbies.set(code, new Lobby(code));
         const lobby = lobbies.get(code);
 
-        // Player is Base 1 (Left Side)
-        lobby.realPlayers.set(socket.id, { id: socket.id, x: 800, y: 1000, carryingAnimal: null });
-        const playerBase = new Base(800, 1000);
+        lobby.realPlayers.set(socket.id, { id: socket.id, x: 800, y: 1000, carryingAnimal: null, money: data.savedData?.money || 0 });
+        const playerBase = new Base(800, 1000); // Player base is at X:800, Y:1000
         playerBase.ownerId = socket.id;
         lobby.bases.set(socket.id, playerBase);
 
-        // Generate Bots on the right side and corners
         if (lobby.bots.size < 3) {
             const botLocs = [{x: 1200, y: 1000}, {x: 800, y: 800}, {x: 1200, y: 800}];
             const loc = botLocs[lobby.bots.size];
@@ -146,15 +153,30 @@ io.on('connection', (socket) => {
             players: Array.from(lobby.realPlayers.values()), 
             bots: Array.from(lobby.bots.values()), 
             animals: lobby.centralAnimals,
-            bases: Array.from(lobby.bases.values())
+            bases: Array.from(lobby.bases.values()),
+            currentWeather: lobby.weather
         });
     });
 
     socket.on('playerMove', (coords) => {
         const code = playersToLobby.get(socket.id);
-        if(code && lobbies.get(code).realPlayers.has(socket.id)) {
-            lobbies.get(code).realPlayers.get(socket.id).x = coords.x; 
-            lobbies.get(code).realPlayers.get(socket.id).y = coords.y;
+        if(!code) return;
+        const lobby = lobbies.get(code);
+        const player = lobby.realPlayers.get(socket.id);
+        if(player) {
+            player.x = coords.x; player.y = coords.y;
+            
+            // --- RESTORED: BASE AUTO-SELL DEPOSIT LOGIC ---
+            const myBase = lobby.bases.get(socket.id);
+            if(player.carryingAnimal && myBase) {
+                const distToPad = Math.hypot(player.x - myBase.x, player.y - myBase.y);
+                if (distToPad < 20) {
+                    player.money += player.carryingAnimal.value;
+                    socket.emit('moneyUpdated', player.money); // Tells UI to update and save
+                    player.carryingAnimal = null;
+                }
+            }
+
             socket.to(code).emit('playerMoved', { id: socket.id, x: coords.x, y: coords.y });
         }
     });
@@ -172,6 +194,22 @@ io.on('connection', (socket) => {
                 io.to(code).emit('animalRemoved', animalId);
             }
         }
+    });
+
+    socket.on('adminSpawnRequest', (rarity) => {
+        const code = playersToLobby.get(socket.id);
+        if(!code) return;
+        const animal = new Animal(rarity, null, lobbies.get(code).weather);
+        lobbies.get(code).centralAnimals.push(animal);
+        io.to(code).emit('animalSpawned', animal);
+    });
+
+    socket.on('adminGiveIllegal', () => {
+        const code = playersToLobby.get(socket.id);
+        if(!code) return;
+        const animal = new Animal("Illegal", "Mutated", "Clear");
+        lobbies.get(code).centralAnimals.push(animal);
+        io.to(code).emit('animalSpawned', animal);
     });
 });
 
