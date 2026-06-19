@@ -198,15 +198,27 @@ function setupInputListeners() {
         if (e.key === ' ') keys.space = false;
     });
 
-    document.getElementById('join-btn').addEventListener('click', () => {
-        const code = document.getElementById('join-code-input').value.toUpperCase();
-        if (code.length === 6) { window.location.reload(); }
-    });
+// Safe Friending UI Listener
+    const joinBtn = document.getElementById('join-btn');
+    if (joinBtn) {
+        joinBtn.addEventListener('click', () => {
+            const codeInput = document.getElementById('join-code-input');
+            if (codeInput && codeInput.value.length === 6) { 
+                window.location.reload(); 
+            }
+        });
+    }
 
-    document.getElementById('admin-spawn-btn').addEventListener('click', () => {
-        const rarity = document.getElementById('admin-rarity-select').value;
-        socket.emit('adminSpawnRequest', rarity);
-    });
+    // Safe Admin Spawner Listener
+    const adminSpawnBtn = document.getElementById('admin-spawn-btn');
+    if (adminSpawnBtn) {
+        adminSpawnBtn.addEventListener('click', () => {
+            const raritySelect = document.getElementById('admin-rarity-select');
+            if (raritySelect) {
+                socket.emit('adminSpawnRequest', raritySelect.value);
+            }
+        });
+    }-+
 }
 
 // --- GAMEPLAY MECHANICS ---
