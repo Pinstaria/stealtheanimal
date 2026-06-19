@@ -10,8 +10,9 @@ let entities = new Map();
 let centralAnimals = new Map(); 
 let localPlayerMesh = null;
 
-// Camera orbit angle
-let cameraAngle = 0;
+// Camera System
+let camAngleX = 0, camAngleY = 0.5; 
+let isDragging = false;
 
 const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false, space: false };
 
@@ -19,6 +20,7 @@ const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowDown
 function init3D() {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x1a1a1a); 
+    scene.fog = new THREE.Fog(0x1a1a1a, 20, 200); // Weather fog
 
     camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
     renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -91,6 +93,18 @@ function init3D() {
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
     });
+
+    // Camera Drag Controls
+    window.addEventListener('mousedown', (e) => { if(e.button === 2 || e.button === 0) isDragging = true; });
+    window.addEventListener('mouseup', () => isDragging = false);
+    window.addEventListener('mousemove', (e) => {
+        if (isDragging) {
+            camAngleX -= e.movementX * 0.005;
+            camAngleY -= e.movementY * 0.005;
+            camAngleY = Math.max(0.1, Math.min(Math.PI / 2 - 0.1, camAngleY)); 
+        }
+    });
+    window.addEventListener('contextmenu', e => e.preventDefault());
 }
 
 // --- CORE GAME ENGINE ---
@@ -108,14 +122,13 @@ async function initGame() {
         localData = authData.savedData;
         document.getElementById('money-display').innerText = localData.money;
 
-        // [CRASH FIX] Safely check if the admin menu exists before trying to show it
         const adminMenu = document.getElementById('admin-menu');
         if (localData.isAdmin === true && adminMenu) {
             adminMenu.style.display = 'block';
         }
 
         // CONNECT TO MULTIPLAYER SERVER
-        socket = io("https://stealtheanimal.onrender.com"); 
+        socket = io("https://stealtheanimal.onrender.com/"); 
         uiManager = new UIManager(localData, socket, myUid);
         
         socket.emit('joinLobby', { savedData: localData });
@@ -133,7 +146,8 @@ function setupSocketListeners() {
     socket.on('lobbyJoined', (data) => {
         myId = socket.id;
         lobbyCode = data.friendCode;
-        document.getElementById('friend-code-display').innerText = lobbyCode;
+        const codeDisp = document.getElementById('friend-code-display');
+        if(codeDisp) codeDisp.innerText = lobbyCode;
         
         data.players.forEach(p => spawnPlayerMesh(p, false));
         data.bots.forEach(b => spawnPlayerMesh(b, true));
@@ -150,6 +164,14 @@ function setupSocketListeners() {
         }
     });
 
+    socket.on('botPositions', (bots) => {
+        bots.forEach(b => {
+            if (entities.has(b.id)) {
+                entities.get(b.id).position.set((b.x - 1000) * 0.1, 1.5, (b.y - 1000) * 0.1);
+            } else spawnPlayerMesh(b, true);
+        });
+    });
+
     socket.on('entityAdded', (entity) => { 
         if (!entities.has(entity.id)) spawnPlayerMesh(entity, entity.isBot); 
     });
@@ -162,9 +184,20 @@ function setupSocketListeners() {
     });
 
     socket.on('animalGrabbed', (data) => {
-        if (centralAnimals.has(data.animal.id)) {
-            scene.remove(centralAnimals.get(data.animal.id));
-            centralAnimals.delete(data.animal.id);
+        const animalId = data.animalId || (data.animal && data.animal.id);
+        if (centralAnimals.has(animalId)) {
+            scene.remove(centralAnimals.get(animalId));
+            centralAnimals.delete(animalId);
+        }
+    });
+
+    socket.on('weatherChanged', (weather) => {
+        if(weather === "Radioactive") {
+            scene.background = new THREE.Color(0x2c3e50);
+            scene.fog.color.setHex(0x27ae60);
+        } else {
+            scene.background = new THREE.Color(0x1a1a1a);
+            scene.fog.color.setHex(0x1a1a1a);
         }
     });
 }
@@ -184,18 +217,23 @@ function spawnAnimalMesh(animal) {
     const x3d = (animal.x - 1000) * 0.1;
     const z3d = (animal.y - 1000) * 0.1;
     
-    // Future update: If animal has a "mutation", make the box larger!
-    const size = animal.isMutated ? 2.5 : 1.5;
+    const size = animal.isMutated ? 3 : 1.5; 
     const animalGeo = new THREE.BoxGeometry(size, size, size);
     
     let hex = 0xf1c40f; 
     if(animal.rarity === "Azure") hex = 0x00a8ff;
     if(animal.rarity === "Diamond") hex = 0x74b9ff;
-    if(animal.isMutated) hex = 0x9b59b6; // Purple for mutations!
+    if(animal.rarity === "Illegal") hex = 0x000000;
     
-    const animalMat = new THREE.MeshStandardMaterial({ color: hex, roughness: 0.2 });
+    const animalMat = new THREE.MeshStandardMaterial({ 
+        color: hex, 
+        roughness: 0.2,
+        emissive: animal.isMutated ? 0x9b59b6 : (animal.rarity === "Illegal" ? 0xff0000 : 0x000000), 
+        emissiveIntensity: animal.isMutated || animal.rarity === "Illegal" ? 0.8 : 0 
+    });
+
     const animalMesh = new THREE.Mesh(animalGeo, animalMat);
-    animalMesh.position.set(x3d, 1, z3d);
+    animalMesh.position.set(x3d, size/2, z3d);
     
     scene.add(animalMesh);
     centralAnimals.set(animal.id, animalMesh);
@@ -208,7 +246,10 @@ function setupInputListeners() {
         if (e.key === 'a' || e.key === 'ArrowLeft') keys.a = keys.ArrowLeft = true;
         if (e.key === 's' || e.key === 'ArrowDown') keys.s = keys.ArrowDown = true;
         if (e.key === 'd' || e.key === 'ArrowRight') keys.d = keys.ArrowRight = true;
-        if (e.key === ' ') { keys.space = true; attemptGrab(); }
+        if (e.key === ' ') { 
+            keys.space = true; 
+            attemptGrab(); 
+        }
     });
     window.addEventListener('keyup', (e) => {
         if (e.key === 'w' || e.key === 'ArrowUp') keys.w = keys.ArrowUp = false;
@@ -217,15 +258,6 @@ function setupInputListeners() {
         if (e.key === 'd' || e.key === 'ArrowRight') keys.d = keys.ArrowRight = false;
         if (e.key === ' ') keys.space = false;
     });
-
-    // 360 DEGREE CAMERA LOOK AROUND
-    window.addEventListener('mousemove', (e) => {
-        if (e.buttons === 2) { // If Right-Click is held down
-            cameraAngle -= e.movementX * 0.01; // Rotate camera based on mouse swipe
-        }
-    });
-    // Prevent the standard right-click menu from popping up and ruining gameplay
-    window.addEventListener('contextmenu', e => e.preventDefault());
 
     const joinBtn = document.getElementById('join-btn');
     if (joinBtn) {
@@ -242,6 +274,12 @@ function setupInputListeners() {
             if (raritySelect) { socket.emit('adminSpawnRequest', raritySelect.value); }
         });
     }
+
+    const btnWeather = document.getElementById('admin-weather-btn');
+    if(btnWeather) btnWeather.addEventListener('click', () => socket.emit('adminToggleWeather'));
+
+    const btnIllegal = document.getElementById('admin-illegal-btn');
+    if(btnIllegal) btnIllegal.addEventListener('click', () => socket.emit('adminGiveIllegal', null));
 }
 
 // --- GAMEPLAY MECHANICS ---
@@ -261,32 +299,35 @@ function updateMovement() {
     const speed = 0.6;
     let moved = false;
 
-    // Relative movement based on Camera Angle (W always goes "forward" relative to where you look)
-    const sinAngle = Math.sin(cameraAngle);
-    const cosAngle = Math.cos(cameraAngle);
+    // Relative movement based on Camera Angle
+    const forwardX = Math.sin(camAngleX);
+    const forwardZ = Math.cos(camAngleX);
+    const rightX = Math.sin(camAngleX - Math.PI/2);
+    const rightZ = Math.cos(camAngleX - Math.PI/2);
 
     if (keys.w || keys.ArrowUp) { 
-        localPlayerMesh.position.x -= sinAngle * speed; 
-        localPlayerMesh.position.z -= cosAngle * speed; 
+        localPlayerMesh.position.x -= forwardX * speed; 
+        localPlayerMesh.position.z -= forwardZ * speed; 
         moved = true; 
     }
     if (keys.s || keys.ArrowDown) { 
-        localPlayerMesh.position.x += sinAngle * speed; 
-        localPlayerMesh.position.z += cosAngle * speed; 
+        localPlayerMesh.position.x += forwardX * speed; 
+        localPlayerMesh.position.z += forwardZ * speed; 
         moved = true; 
     }
     if (keys.a || keys.ArrowLeft) { 
-        localPlayerMesh.position.x -= cosAngle * speed; 
-        localPlayerMesh.position.z += sinAngle * speed; 
+        localPlayerMesh.position.x -= rightX * speed; 
+        localPlayerMesh.position.z -= rightZ * speed; 
         moved = true; 
     }
     if (keys.d || keys.ArrowRight) { 
-        localPlayerMesh.position.x += cosAngle * speed; 
-        localPlayerMesh.position.z -= sinAngle * speed; 
+        localPlayerMesh.position.x += rightX * speed; 
+        localPlayerMesh.position.z += rightZ * speed; 
         moved = true; 
     }
 
     if (moved) {
+        // 3D Wall Boundaries (Don't run off the map)
         const dist = Math.hypot(localPlayerMesh.position.x, localPlayerMesh.position.z);
         if(dist > 145) {
             const angle = Math.atan2(localPlayerMesh.position.z, localPlayerMesh.position.x);
@@ -305,13 +346,12 @@ function gameLoop() {
     updateMovement();
     
     if (localPlayerMesh) {
-        const camDist = 25;
-        // Orbit camera around player using trigonometry
-        camera.position.x = localPlayerMesh.position.x + Math.sin(cameraAngle) * camDist;
-        camera.position.z = localPlayerMesh.position.z + Math.cos(cameraAngle) * camDist;
-        camera.position.y = localPlayerMesh.position.y + 18; 
-        
-        camera.lookAt(localPlayerMesh.position.x, localPlayerMesh.position.y, localPlayerMesh.position.z);
+        const dist = 30;
+        // Orbit camera around player using trigonometry and mouse angles
+        camera.position.x = localPlayerMesh.position.x + dist * Math.sin(camAngleX) * Math.cos(camAngleY);
+        camera.position.y = localPlayerMesh.position.y + dist * Math.sin(camAngleY);
+        camera.position.z = localPlayerMesh.position.z + dist * Math.cos(camAngleX) * Math.cos(camAngleY);
+        camera.lookAt(localPlayerMesh.position);
     }
     
     renderer.render(scene, camera);
