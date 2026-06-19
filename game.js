@@ -9,7 +9,7 @@ let entities = new Map(), centralAnimals = new Map();
 let floatingLabels = {}; 
 
 // ALL keys restored
-const keys = { w: false, a: false, s: false, d: false };f
+const keys = { w: false, a: false, s: false, d: false };
 
 let camAngleX = 0, camAngleY = 0.5; 
 let isDragging = false;
