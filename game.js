@@ -149,12 +149,19 @@ function setupSocketListeners() {
 
 // --- 3D SPAWNERS ---
 function spawnPlayerMesh(data, isBot) {
-    const bodyGeo = new THREE.CapsuleGeometry(1, 2, 4, 8);
-    const bodyMat = new THREE.MeshStandardMaterial({ color: data.id === socket.id ? 0x3498db : (isBot ? 0xe67e22 : 0xe74c3c) });
+    // Changed from Capsule to Cylinder so it works flawlessly with your 3D version
+    const bodyGeo = new THREE.CylinderGeometry(1, 1, 3, 16);
+    
+    const bodyMat = new THREE.MeshStandardMaterial({ 
+        color: data.id === socket.id ? 0x3498db : (isBot ? 0xe67e22 : 0xe74c3c) 
+    });
+    
     const mesh = new THREE.Mesh(bodyGeo, bodyMat);
     mesh.position.set((data.x - 1000) * 0.1, 1.5, (data.y - 1000) * 0.1);
+    
     scene.add(mesh);
     entities.set(data.id, mesh);
+    
     if (data.id === socket.id) localPlayerMesh = mesh;
 }
 
