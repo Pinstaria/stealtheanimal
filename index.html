@@ -37,7 +37,7 @@
             <button id="spin-wheel-btn">Spin Wheel</button>
         </div>
 
-        <div id="admin-menu" class="hud-box" style="display: none;">
+        <div id="admin-menu" class="hud-box" style="position: absolute; top: 150px; left: 20px; z-index: 9999;">
             <h3 style="color: #f1c40f;">👑 Admin Panel</h3>
             <select id="admin-rarity-select">
                 <option value="Regular">Regular</option>
@@ -45,6 +45,9 @@
                 <option value="Azure">Azure</option>
             </select>
             <button id="admin-spawn-btn" class="admin-btn">Force Spawn</button>
+            <br><br>
+            <button id="admin-weather-btn" class="admin-btn" style="background: #27ae60;">Toggle Weather</button>
+            <button id="admin-illegal-btn" class="admin-btn" style="background: #000; color: red;">Give Illegal</button>
         </div>
 
         <div id="upgrades-menu" class="hud-box">
