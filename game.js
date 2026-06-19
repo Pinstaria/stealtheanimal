@@ -115,7 +115,7 @@ async function initGame() {
         }
 
         // CONNECT TO MULTIPLAYER SERVER
-        socket = io("https://animal-snatchers-server.onrender.com"); 
+        socket = io("https://stealtheanimal.onrender.com"); 
         uiManager = new UIManager(localData, socket, myUid);
         
         socket.emit('joinLobby', { savedData: localData });
