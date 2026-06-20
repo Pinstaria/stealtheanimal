@@ -3,67 +3,175 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Animal Snatchers</title>
-    <link rel="icon" href="data:;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==">
+    <title>Animal Snatchers - Steal a Brainrot</title>
     <style>
-        body, html { margin: 0; padding: 0; overflow: hidden; background-color: #111; font-family: 'Courier New', Courier, monospace; }
-        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
-        .hud-box { pointer-events: auto; background: rgba(0, 0, 0, 0.85); color: white; padding: 15px; border-radius: 8px; position: absolute; border: 2px solid #3498db; }
-        #top-left { top: 20px; left: 20px; }
-        #top-right { top: 20px; right: 20px; }
-        #events-menu { top: 240px; right: 20px; }
-        #upgrades-menu { bottom: 20px; right: 20px; }
-        button { background: #3498db; color: white; border: none; padding: 10px; cursor: pointer; font-weight: bold; border-radius: 5px; margin-top: 5px; width: 100%; display: block; }
-        button:hover { background: #2980b9; }
-        input { padding: 8px; border-radius: 4px; border: none; outline: none; width: 80%; display: block; margin-bottom: 5px; }
+        /* --- RESET & CANVAS SETUP --- */
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #1a1a1a;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            user-select: none; /* Prevents accidentally highlighting text while playing */
+        }
+        
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* --- UI LAYER (HUD) --- */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Lets you click "through" the UI to drag the camera */
+            z-index: 100;
+        }
+
+        .hud-box {
+            background: rgba(30, 39, 46, 0.85);
+            border: 2px solid #34495e;
+            border-radius: 10px;
+            padding: 15px;
+            color: white;
+            pointer-events: auto; /* Makes buttons inside the box clickable */
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+
+        /* --- SPECIFIC UI PLACEMENTS --- */
+        #top-center-hud {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+            font-size: 24px;
+            font-weight: bold;
+            color: #2ecc71;
+        }
+
+        #top-right-hud {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            text-align: right;
+        }
+
+        #admin-menu {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            display: none; /* Hidden by default until Firebase confirms you are an Admin */
+        }
+
+        /* --- BUTTONS & INPUTS --- */
+        input, select {
+            padding: 8px;
+            margin: 5px 0;
+            border-radius: 5px;
+            border: 1px solid #7f8c8d;
+            background: #2c3e50;
+            color: white;
+        }
+
+        button {
+            padding: 8px 15px;
+            margin: 5px 2px;
+            border: none;
+            border-radius: 5px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.1s, opacity 0.2s;
+        }
+        
+        button:hover { opacity: 0.9; transform: scale(1.05); }
+        button:active { transform: scale(0.95); }
+
+        .btn-blue { background: #3498db; color: white; }
+        .btn-green { background: #27ae60; color: white; }
+        .btn-red { background: #c0392b; color: white; border: 1px solid #ff0000; }
+        
+        /* Crosshair for the center of the screen */
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 10px;
+            height: 10px;
+            background: rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
     </style>
 </head>
 <body>
 
+    <div id="crosshair"></div>
+
     <div id="ui-layer">
-        <div id="top-left" class="hud-box">
-            <h2>💰 $<span id="money-display">0</span></h2>
-            <p>Friend Code: <strong id="friend-code-display">...</strong></p>
+        
+        <div id="top-center-hud" class="hud-box">
+            💰 $<span id="money-display">0</span>
         </div>
 
-        <div id="top-right" class="hud-box">
-            <h3>Join Friend</h3>
-            <input type="text" id="join-code-input" placeholder="Enter Code" maxlength="6">
-            <button id="join-btn">Join Lobby</button>
+        <div id="top-right-hud" class="hud-box">
+            <h3 style="margin: 0 0 10px 0; color: #3498db;">Server: <span id="friend-code-display">CONNECTING...</span></h3>
+            <input type="text" id="join-code-input" placeholder="Enter 6-Digit Code" maxlength="6" style="width: 120px;">
+            <button id="join-btn" class="btn-blue">Join</button>
+            <p style="font-size: 12px; color: #bdc3c7; margin-top: 10px;">
+                [W, A, S, D] Move<br>
+                [Right-Click Drag] Rotate Camera<br>
+                [Spacebar] Steal / Grab Item<br>
+                [E] Buy Capacity (at Blue Pad)
+            </p>
         </div>
 
-        <div id="events-menu" class="hud-box">
-            <h3>🎡 Daily Event</h3>
-            <button id="spin-wheel-btn">Spin Wheel</button>
-        </div>
-
-        <div id="admin-menu" class="hud-box" style="position: absolute; top: 150px; left: 20px; z-index: 9999;">
-            <h3 style="color: #f1c40f;">👑 Admin Panel</h3>
+        <div id="admin-menu" class="hud-box">
+            <h3 style="margin: 0 0 10px 0; color: #f1c40f;">👑 Admin Panel</h3>
+            
             <select id="admin-rarity-select">
                 <option value="Regular">Regular</option>
+                <option value="White">White</option>
+                <option value="Red">Red</option>
+                <option value="Orange">Orange</option>
+                <option value="yellow">Yellow</option>
+                <option value="green">Green</option>
+                <option value="blue">Blue</option>
+                <option value="purple">Purple</option>
+                <option value="pink">Pink</option>
+                <option value="Teal">Teal</option>
+                <option value="Fuchsia">Fuchsia</option>
+                <option value="Turquoise">Turquoise</option>
+                <option value="Gold">Gold</option>
                 <option value="Diamond">Diamond</option>
+                <option value="Rainbow">Rainbow</option>
+                <option value="Crimson">Crimson</option>
+                <option value="Platinum">Platinum</option>
+                <option value="Coral">Coral</option>
+                <option value="Canary">Canary</option>
+                <option value="Charteasue">Charteasue</option>
                 <option value="Azure">Azure</option>
             </select>
-            <button id="admin-spawn-btn" class="admin-btn">Force Spawn</button>
-            <br><br>
-            <button id="admin-weather-btn" class="admin-btn" style="background: #27ae60;">Toggle Weather</button>
-            <button id="admin-illegal-btn" class="admin-btn" style="background: #000; color: red;">Give Illegal</button>
+            <button id="admin-spawn-btn" class="btn-blue">Force Drop</button>
+            
+            <hr style="border-color: #7f8c8d; margin: 10px 0;">
+            
+            <button id="admin-weather-btn" class="btn-green">Toggle Weather</button>
+            <button id="admin-illegal-btn" class="btn-red">Give Illegal</button>
         </div>
 
-        <div id="upgrades-menu" class="hud-box">
-            <h3>🛠️ Base Upgrades</h3>
-            <p>Status: <strong id="base-status" style="color: #e74c3c;">🔓 UNLOCKED</strong></p>
-            <button id="lock-base-btn">Lock Base</button>
-            <button id="upgrade-capacity-btn">Upgrade Capacity ($5k)</button>
-            <button id="upgrade-lock-btn">Upgrade Lock Time ($2.5k)</button>
-        </div>
     </div>
 
-    <link rel="icon" href="data:;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==">
-
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script type="module" src="./firebase-setup.js"></script>
+    
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-    <script type="module" src="./game.js"></script>
+
+    <script type="module" src="game.js"></script>
+
 </body>
 </html>
